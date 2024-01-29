@@ -1,0 +1,37 @@
+plugins {
+    id 'war'
+    id "io.openliberty.tools.gradle.Liberty" version "3.6.2"
+    id 'wrapper'
+    id 'checkstyle'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compileOnly platform('org.eclipse.microprofile:microprofile:5.0')
+    compileOnly 'jakarta.platform:jakarta.jakartaee-api:10.0.0'
+    compileOnly 'org.eclipse.microprofile.reactive.messaging:microprofile-reactive-messaging-api:3.0'
+    testImplementation platform('org.junit:junit-bom:5.9.1')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+
+
+liberty {
+    // Set this to your open-liberty workspace /dev/build.image/wlp
+    //installDir = "C:\\Users\\101556866\\Downloads\\wlp-abutch3r-27251-20240103-0520\\wlp"
+    installDir = "C:\\Users\\101556866\\IBM\\openliberty\\open-liberty\\dev\\build.image\\wlp"
+    server {
+        name = "ReactiveMessaging30Demo"
+        configDirectory = file("src/main/liberty/config") // workaround to ensure config files are always copied OpenLiberty/ci.gradle#686
+        features {
+            acceptLicense = true
+        }
+    }
+}
