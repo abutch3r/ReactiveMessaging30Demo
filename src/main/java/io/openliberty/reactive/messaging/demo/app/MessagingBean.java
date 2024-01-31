@@ -5,11 +5,19 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.reactive.messaging.Incoming;
 import org.eclipse.microprofile.reactive.messaging.Message;
 import org.eclipse.microprofile.reactive.messaging.Outgoing;
+import org.eclipse.microprofile.reactive.streams.operators.PublisherBuilder;
+import org.eclipse.microprofile.reactive.streams.operators.ReactiveStreams;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @ApplicationScoped
 public class MessagingBean {
+
+    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private volatile Throwable downstreamFailure;
 
     @Inject
     MessageStore messageStore;
@@ -37,13 +45,40 @@ public class MessagingBean {
     }
 
     @Incoming("buffer")
-    public CompletionStage<Void> handleBufferedMessages(Message message){
-        System.out.println("Received buffered message " + message.getPayload());
-        try {
-            Thread.sleep(5000);
-            return message.ack();
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
+    @Outgoing("bufferOut")
+    public PublisherBuilder<String> handleBufferedMessages(final PublisherBuilder<String> values){
+        return values
+                .via(ReactiveStreams.<String>builder().flatMapCompletionStage(s -> CompletableFuture.supplyAsync(() -> {
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                    }
+                    return s;
+                }, executor))).onError(err -> downstreamFailure = err);
+    }
+
+    @Incoming("bufferOut")
+    public void bufferOut(String message){
+        System.out.println("Completed processing of message: "+ message);
+    }
+
+    @Incoming("drop")
+    @Outgoing("dropOut")
+    public PublisherBuilder<String> handleDroppableMessages(final PublisherBuilder<String> values){
+        return values
+                .via(ReactiveStreams.<String>builder().flatMapCompletionStage(s -> CompletableFuture.supplyAsync(() -> {
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                    }
+                    return s;
+                }, executor))).onError(err -> downstreamFailure = err);
+    }
+
+    @Incoming("dropOut")
+    public void dropOut(String message){
+        System.out.println("didn't drop message "+ message);
     }
 }

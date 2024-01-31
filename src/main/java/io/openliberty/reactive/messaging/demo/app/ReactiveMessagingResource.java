@@ -8,6 +8,7 @@ import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.reactive.messaging.Channel;
 import org.eclipse.microprofile.reactive.messaging.Emitter;
 import org.eclipse.microprofile.reactive.messaging.Message;
@@ -26,8 +27,13 @@ public class ReactiveMessagingResource {
 
     @Inject
     @Channel("buffer")
-    @OnOverflow(value = OnOverflow.Strategy.BUFFER, bufferSize = 1)
+    @OnOverflow(value = OnOverflow.Strategy.BUFFER, bufferSize = 10)
     Emitter<String> bufferedEmitter;
+
+    @Inject
+    @Channel("drop")
+    @OnOverflow(value = OnOverflow.Strategy.DROP)
+    Emitter<String> dropEmitter;
 
     @Inject
     @Channel("nack")
@@ -55,15 +61,16 @@ public class ReactiveMessagingResource {
     @POST
     @Path("/nack")
     @Consumes(MediaType.TEXT_PLAIN)
-    public CompletionStage<Void>  receiveNackableMessage(String message){
-        CompletableFuture<Void> ackCf = new CompletableFuture<>();
+    public CompletionStage<Response>  receiveNackableMessage(String message){
+        CompletableFuture<Response> ackCf = new CompletableFuture<>();
         nackEmitter.send(
             Message.of(message,
                 () -> {
-                    ackCf.complete(null);
+                    ackCf.complete(Response.status(Response.Status.NO_CONTENT).build());
                     return CompletableFuture.completedFuture(null);
                 }, t -> {
-                    ackCf.completeExceptionally(t);
+                    //ackCf.completeExceptionally(t);
+                    ackCf.complete(Response.status(Response.Status.BAD_REQUEST).entity(t.getMessage()).build());
                     return CompletableFuture.completedFuture(null);
                 }
             )
@@ -74,21 +81,16 @@ public class ReactiveMessagingResource {
     @POST
     @Path("/buffer")
     @Consumes(MediaType.TEXT_PLAIN)
-    public CompletionStage<Void>  receiveBufferedkableMessage(String message){
+    public CompletionStage<Void> buffer(String message){
         System.out.println("Processing buffered message " + message);
-        CompletableFuture<Void> ackCf = new CompletableFuture<>();
-        bufferedEmitter.send(
-                Message.of(message,
-                        () -> {
-                            ackCf.complete(null);
-                            return CompletableFuture.completedFuture(null);
-                        }, t -> {
-                            ackCf.completeExceptionally(t);
-                            return CompletableFuture.completedFuture(null);
-                        }
-                )
-        );
-        return ackCf;
+        return bufferedEmitter.send(message);
+    }
+
+    @POST
+    @Path("drop")
+    public CompletionStage<Void> drop(String message){
+        System.out.println("Processing drop message " + message);
+        return dropEmitter.send(message);
     }
 
 }
