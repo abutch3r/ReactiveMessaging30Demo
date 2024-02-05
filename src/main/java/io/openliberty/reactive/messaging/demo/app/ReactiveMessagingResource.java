@@ -14,6 +14,8 @@ import org.eclipse.microprofile.reactive.messaging.Emitter;
 import org.eclipse.microprofile.reactive.messaging.Message;
 import org.eclipse.microprofile.reactive.messaging.OnOverflow;
 
+import javax.naming.InitialContext;
+import javax.naming.NamingException;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -38,6 +40,14 @@ public class ReactiveMessagingResource {
     @Inject
     @Channel("nack")
     Emitter<String> nackEmitter;
+
+    @Inject
+    @Channel("propagate-all-context-out")
+    Emitter<String> propagateAllEmitter;
+
+    @Inject
+    @Channel("propagate-no-context-out")
+    Emitter<String> propagateNoneEmitter;
 
     @Inject
     private MessageStore messageStore;
@@ -88,9 +98,53 @@ public class ReactiveMessagingResource {
 
     @POST
     @Path("drop")
+    @Consumes(MediaType.TEXT_PLAIN)
     public CompletionStage<Void> drop(String message){
         System.out.println("Processing drop message " + message);
         return dropEmitter.send(message);
+    }
+
+    @POST
+    @Path("propagateAll")
+    @Consumes(MediaType.TEXT_PLAIN)
+    public CompletionStage<Void> propagateAll(String message){
+        System.out.println("Progagting message " + processContextMessage(message) + " with all context");
+        return propagateAllEmitter.send(message);
+    }
+
+    @POST
+    @Path("propagateNone")
+    @Consumes(MediaType.TEXT_PLAIN)
+    public CompletionStage<Void> propagateNone(String message){
+        System.out.println("Progagting message " + processContextMessage(message) +" with no context");
+        return propagateNoneEmitter.send(message);
+    }
+
+    public String processContextMessage(String input){
+        try {
+            return input + "-" + getAppName() + "-" + isTcclSet();
+        } catch (Exception e) {
+            return e.toString();
+        }
+    }
+
+    private String getAppName() {
+        try {
+            return (String) new InitialContext().lookup("java:app/AppName");
+        } catch (NamingException e) {
+            return "noapp";
+        }
+    }
+
+    private boolean isTcclSet() {
+        ClassLoader tccl = Thread.currentThread().getContextClassLoader();
+        // Check if Liberty's special classloader is the TCCL
+        // Unfortunately, when the TCCL is not set, we get a context classloader which delegates based on the classes on the stack so this is the easiest way to determine whether we have a regular TCCL or not
+        if (tccl.getClass().getName().endsWith("ThreadContextClassLoader")) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
 }
