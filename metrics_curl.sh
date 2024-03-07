@@ -1,0 +1,1 @@
+curl http://localhost:9081/metrics?name=mp_messaging_message_count_total

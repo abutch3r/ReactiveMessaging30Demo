@@ -8,8 +8,6 @@ import org.eclipse.microprofile.reactive.messaging.Outgoing;
 import org.eclipse.microprofile.reactive.streams.operators.PublisherBuilder;
 import org.eclipse.microprofile.reactive.streams.operators.ReactiveStreams;
 
-import javax.naming.InitialContext;
-import javax.naming.NamingException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
@@ -24,6 +22,10 @@ public class MessagingBean {
     @Inject
     MessageStore messageStore;
 
+    /**
+     * Takes a messages of of the kafka topic for the kafka-message-in channel
+     * Once processed returns the message to be stored on the kafka topic backing the kafka-message-out channel
+     */
     @Incoming("kafka-message-in")
     @Outgoing("kafka-message-out")
     public String processMessage(String name){
@@ -31,21 +33,45 @@ public class MessagingBean {
         return "hello " + name;
     }
 
+    /**
+     * Stores message from received from the kafka-message-return channel in the internal store
+     */
     @Incoming("kafka-message-return")
     public void storeMessage(String message){
-        System.out.println("storing " + message);
+        System.out.println("Storing " + message);
         messageStore.storeMessage(message);
     }
 
-    @Incoming("nack")
+    /**
+     * Checks names provided start with a capital, if they do not they are rejected with an IllegalArgumentException
+     *
+     * As the method recevies an Object of type Message, it must be manually acked or nacked. if the paylaod was being processed
+     * the framework would be able to han
+     */
+    @Incoming("nackMessage")
     public CompletionStage<Void> nackMessage(Message message){
-        if (message.getPayload().equals("alex")){
-            return message.nack(new Exception("I don't like alex"));
+        if (!Character.isUpperCase(message.getPayload().toString().charAt(0))){
+            return message.nack(new IllegalArgumentException("Name does not start with a capital letter"));
         } else {
             return message.ack();
         }
     }
 
+    @Incoming("nackPayload")
+    public void nackPayload(String payload){
+        if (!Character.isUpperCase(payload.charAt(0))){
+            throw new IllegalArgumentException("Name does not start with a capital letter");
+        }
+    }
+
+    /**
+     * Handles messages from the `buffer` outgoing channel emitter.
+     *
+     * Each message is held for one second before processing, creating the impression of processing of the the message
+     * It is expected that under load this will cause messages to no longer be buffered
+     *
+     * If the message is processed it is returned to the `bufferOut` channel for completing processing
+     */
     @Incoming("buffer")
     @Outgoing("bufferOut")
     public PublisherBuilder<String> handleBufferedMessages(final PublisherBuilder<String> values){
@@ -61,6 +87,9 @@ public class MessagingBean {
     }
 
     @Incoming("bufferOut")
+    /**
+     * If a message reaches this point, it is acknowledged via the framework
+     */
     public void bufferOut(String message){
         System.out.println("Completed processing of message: "+ message);
     }
@@ -84,40 +113,22 @@ public class MessagingBean {
         System.out.println("Did not drop message "+ message);
     }
 
-    @Incoming("propagate-all-context-in")
-    public void propagateAll(String message){
-        System.out.println(processContextMessage(message));
+    @Incoming("latest")
+    @Outgoing("latestOut")
+    public PublisherBuilder<String> handleLatestMessages(final PublisherBuilder<String> values){
+        return values
+                .via(ReactiveStreams.<String>builder().flatMapCompletionStage(s -> CompletableFuture.supplyAsync(() -> {
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                    }
+                    return s;
+                }, executor))).onError(err -> downstreamFailure = err);
     }
 
-    @Incoming("propagate-no-context-in")
-    public void propagateNone(String message){
-        System.out.println(processContextMessage(message));
-    }
-
-    public String processContextMessage(String input){
-        try {
-            return input + "-" + getAppName() + "-" + isTcclSet();
-        } catch (Exception e) {
-            return e.toString();
-        }
-    }
-
-    private String getAppName() {
-        try {
-            return (String) new InitialContext().lookup("java:app/AppName");
-        } catch (NamingException e) {
-            return "noapp";
-        }
-    }
-
-    private boolean isTcclSet() {
-        ClassLoader tccl = Thread.currentThread().getContextClassLoader();
-        // Check if Liberty's special classloader is the TCCL
-        // Unfortunately, when the TCCL is not set, we get a context classloader which delegates based on the classes on the stack so this is the easiest way to determine whether we have a regular TCCL or not
-        if (tccl.getClass().getName().endsWith("ThreadContextClassLoader")) {
-            return true;
-        } else {
-            return false;
-        }
+    @Incoming("latestOut")
+    public void latestOut(String message){
+        System.out.println("Did not drop message "+ message);
     }
 }
